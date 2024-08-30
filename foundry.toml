@@ -1,0 +1,10 @@
+[profile.default]
+eth_rpc_url = "https://arb1.arbitrum.io/rpc"
+optimizer = true
+opt_level = "200"
+out = "out"
+solc = "0.8.21"
+test = "test"
+src = 'contracts'
+libs = ["lib"]
+viaIR=true
