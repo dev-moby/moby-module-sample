@@ -17,11 +17,11 @@ contract MobyRouter is Ownable2StepUpgradeable, IERC1155Receiver {
     address public settleManager;
     address public controller;
     address public optionsMarket;
-    mapping(bytes32 => address) public requestKeyOwner;
+    mapping(bytes32 => address) public requestKeyOwner; // every createOpenPosition or createClosePosition will have a requestKey. This mapping identifies the owner of the request
     mapping(bytes32 => bool) public isClaimed;
     mapping(bytes32 => bool) public isOpen;
-    mapping(bytes32 => address) public receivingToken;
-    mapping(address => uint256) public requestKeyLength; // check user's request index
+    mapping(bytes32 => address) public receivingToken; // refund token when request is canceled or payout token when request for closePosition is executed
+    mapping(address => uint256) public requestKeyLength;
     mapping(address => mapping (uint256 => bytes32)) public requestKeyOf; // requestKeyOf(user, index)
 
     event OpenPositionCreated(address indexed owner, bytes32 requestKey);
@@ -29,6 +29,11 @@ contract MobyRouter is Ownable2StepUpgradeable, IERC1155Receiver {
     event Claimed(address indexed account, bytes32 requestKey);
     event PositionSettled(address indexed account, uint256 indexed optionTokenId, uint256 size);
 
+    /*
+    * @dev initialize MobyRouter
+    * @param _positionManager address of PositionManager of Moby
+    * @param _settleManager address of SettleManager of Moby
+    */
     function initilize(address _positionManager, address _settleManager) external initializer {
         __Ownable2Step_init();
         positionManager = _positionManager;
@@ -37,10 +42,30 @@ contract MobyRouter is Ownable2StepUpgradeable, IERC1155Receiver {
         optionsMarket = IPositionManager(positionManager).optionsMarket();
     }
 
+    /**
+     * @dev execuctionFee in PositionManager. Should send as msg.value when createOpenPosition or createClosePosition.
+     */
     function executionFee() public view returns (uint256) {
         return IPositionManager(positionManager).executionFee();
     }
 
+    /*
+    * @dev information about open position request
+    * @param _requestKey request key recieved from createOpenPosition
+    * @return _underlyingAssetIndex underlying asset index
+    * @return _expiry expiry of the option
+    * @return optionTokenId ID of the option token
+    * @return _minSize minimum quantity of option tokens (variable value)
+    * @return _amountIn amount of payment token (fixed value)
+    * @return _minOutWhenSwap minimum quantity of tokens desired when swapping
+    * @return _isDepositedInETH whether the payment token is ETH
+    * @return _blockTime block time at the moment of request
+    * @return _status request status
+    * @return _sizeOut quantity of the executed option token
+    * @return _executionPrice price of the executed option token
+    * @return _processBlockTime block time at the moment of execution
+    * @return _amountOut quantity of the premium when sold option
+    */
     function getOpenPositionRequests(bytes32 _requestKey) public view returns (
         uint16 _underlyingAssetIndex,
         uint40 _expiry,
@@ -74,6 +99,22 @@ contract MobyRouter is Ownable2StepUpgradeable, IERC1155Receiver {
         ) =  IPositionManager(positionManager).openPositionRequests(_requestKey);
     }
 
+    /*
+    * @dev information about close position request
+    * @param _requestKey request key recieved from createClosePosition
+    * @return _underlyingAssetIndex underlying asset index
+    * @return _expiry expiry of the option
+    * @return _optionTokenId ID of the option token
+    * @return _size quantity of the option token (fixed value)
+    * @return _minAmountOut minimum quantity of payout token (variable value)
+    * @return _minOutWhenSwap minimum quantity of tokens desired when swapping
+    * @return _withdrawETH whether the payout token is ETH
+    * @return _blockTime block time at the moment of request
+    * @return _status request status
+    * @return _amountOut quantity of the payout token
+    * @return _executionPrice price of the executed option token
+    * @return _processBlockTime block time at the moment of execution
+    */
     function getClosePositionRequests(bytes32 _requestKey) public view returns (
         uint16 _underlyingAssetIndex,
         uint40 _expiry,
@@ -105,6 +146,9 @@ contract MobyRouter is Ownable2StepUpgradeable, IERC1155Receiver {
         ) = IPositionManager(positionManager).closePositionRequests(_requestKey);
     }
 
+    /*
+    * @dev get information about optionToken by id
+    */
     function parseOptionTokenId(uint256 optionTokenId) public pure returns (
         uint16 underlyingAssetIndex, // 16 bits
         uint40 expiry, // 40 bits
@@ -118,6 +162,11 @@ contract MobyRouter is Ownable2StepUpgradeable, IERC1155Receiver {
         return Utils.parseOptionTokenId(optionTokenId);
     }
 
+    /*
+    * @dev requests to open a position, which will be executed in another transaction.
+    * Can check the status of this request using the getOpenPositionRequests function.
+    * After the request is executed, you can call the claim function to receive tokens based on the result.
+    */
     function createOpenPosition(
         uint16 _underlyingAssetIndex,
         uint8 _length,
@@ -154,6 +203,11 @@ contract MobyRouter is Ownable2StepUpgradeable, IERC1155Receiver {
         emit OpenPositionCreated(msg.sender, _requestKey);
     }
 
+    /*
+    * @dev requests to close a position, which will be executed in another transaction.
+    * Can check the status of this request using the getClosePositionRequests function.
+    * After the request is executed, you can call the claim function to receive tokens based on the result.
+    */
     function createClosePosition(
         uint16 _underlyingAssetIndex,
         uint256 _optionTokenId,
@@ -180,10 +234,13 @@ contract MobyRouter is Ownable2StepUpgradeable, IERC1155Receiver {
         requestKeyOf[msg.sender][requestKeyLength[msg.sender]] = _requestKey;
         requestKeyLength[msg.sender] += 1;
         isOpen[_requestKey] = false;
-        receivingToken[_requestKey] = _path[_path.length - 1];
+        receivingToken[_requestKey] = _path[_path.length - 1]; // payout
         emit ClosePositionCreated(msg.sender, _requestKey);
     }
 
+    /*
+    * @dev settle position after expiration
+    */
     function settlePosition(
         address[] memory _path,
         uint16 _underlyingAssetIndex,
@@ -206,7 +263,15 @@ contract MobyRouter is Ownable2StepUpgradeable, IERC1155Receiver {
         emit PositionSettled(msg.sender, _optionTokenId, size);
     }
 
-    function claim(bytes32 _requestKey) external returns (bool _isExecuted){
+    /*
+    * @dev claim tokens after the request is executed
+    * If the request is cancelled, the tokens that were paid will be refunded.
+    * If the request is executed, the OptionToken(ERC1155) will be transferred to the user.
+    * If the request for selling option is executed, the premium will be transferred to the user.
+    * @param _requestKey request key recieved from createOpenPosition or createClosePosition
+    * @return _isExecuted whether the request is executed (return false if the request is cancelled)
+    */
+    function claim(bytes32 _requestKey) external returns (bool _isExecuted) {
         if (isOpen[_requestKey]) {
             (
                 uint16 underlyingAssetIndex,
@@ -226,7 +291,7 @@ contract MobyRouter is Ownable2StepUpgradeable, IERC1155Receiver {
             require(requestKeyOwner[_requestKey] == msg.sender, "MobyRouter: Not owner");
             require(isClaimed[_requestKey] == false, "MobyRouter: Already claimed");
             if (status == IPositionManager.RequestStatus.Cancelled) {
-                IERC20(receivingToken[_requestKey]).safeTransfer(msg.sender, amountIn);
+                IERC20(receivingToken[_requestKey]).safeTransfer(msg.sender, amountIn); // If Cancelled, the tokens that were paid will be refunded.
                 _isExecuted = false;
             } else if (status == IPositionManager.RequestStatus.Pending) {
                 revert("MobyRouter: Not executed"); 
@@ -271,7 +336,9 @@ contract MobyRouter is Ownable2StepUpgradeable, IERC1155Receiver {
 
 
 
-    // IERC1155Receiver
+    /*
+    * @dev Implement this functions to receive ERC1155 tokens.
+    */
     function onERC1155Received(address /* operator */, address /* from */, uint256 /* id */, uint256 /* value */, bytes calldata /* data */) public virtual override returns (bytes4) {
         return this.onERC1155Received.selector;
     }
