@@ -15,36 +15,36 @@ interface IPositionManager {
     function positionRequestTypes(uint256 index) external view returns (bool);
 
     function openPositionRequests(bytes32 key) external view returns (
-        address account,                    
-        uint16 underlyingAssetIndex,
-        uint40 expiry,
-        uint256 optionTokenId,
-        uint256 minSize,
-        uint256 amountIn,
-        uint256 minOutWhenSwap,
-        bool isDepositedInETH,
-        uint40 blockTime,
-        RequestStatus status,
-        uint256 sizeOut,
-        uint256 executionPrice,
-        uint40 processBlockTime,
-        uint256 amountOut // premium amount when sold option
+        address account,                    // trader's address
+        uint16 underlyingAssetIndex,        // underlying asset index
+        uint40 expiry,                      // expiry of the option
+        uint256 optionTokenId,              // ID of the option token
+        uint256 minSize,                    // minimum quantity of option tokens (variable value)
+        uint256 amountIn,                   // amount of payment token (fixed value)
+        uint256 minOutWhenSwap,             // minimum quantity of tokens desired when swapping
+        bool isDepositedInETH,              // whether the payment token is ETH
+        uint40 blockTime,                   // block time at the moment of request
+        RequestStatus status,               // request status
+        uint256 sizeOut,                    // quantity of the executed option token
+        uint256 executionPrice,             // price of the executed option token
+        uint40 processBlockTime,            // block time at the moment of execution
+        uint256 amountOut                   // quantity of the premium when sold option
     );
 
     function closePositionRequests(bytes32 key) external view returns (
-        address account,
-        uint16 underlyingAssetIndex,
-        uint40 expiry,
-        uint256 optionTokenId,
-        uint256 size,
-        uint256 minAmountOut,
-        uint256 minOutWhenSwap,
-        bool withdrawETH,
-        uint40 blockTime,
-        RequestStatus status,
-        uint256 amountOut,
-        uint256 executionPrice,
-        uint40 processBlockTime
+        address account,                    // trader's address
+        uint16 underlyingAssetIndex,        // underlying asset index
+        uint40 expiry,                      // expiry of the option
+        uint256 optionTokenId,              // ID of the option token
+        uint256 size,                       // quantity of the option token (fixed value)
+        uint256 minAmountOut,               // minimum quantity of payout token (variable value)
+        uint256 minOutWhenSwap,             // minimum quantity of tokens desired when swapping
+        bool withdrawETH,                   // whether the payout token is ETH
+        uint40 blockTime,                   // block time at the moment of request
+        RequestStatus status,               // request status
+        uint256 amountOut,                  // quantity of the payout token
+        uint256 executionPrice,             // price of the executed option token
+        uint40 processBlockTime             // block time at the moment of execution
     );
     function getRequestQueueLengths() external view returns (uint256, uint256, uint256);
     function executePositions(uint256 _count, address payable _executionFeeReceiver) external;
